@@ -21,7 +21,7 @@ module ExportHelper
 
       @efparr = []
       @efpdict = {}
-      @p.extraction_forms.each do |ef|
+      @p.extraction_forms.where(:is_diagnostic => 0).each do |ef|
         efp = ExtractionFormsProjectWrapper.new(ef, @p)
         @efparr << efp
         @efpdict[ef.id] = efp
@@ -542,6 +542,7 @@ module ExportHelper
       dp_model = nil
       q_column = ""
       field_column = ""
+      linked_t1_column = ""
 
       case q.class.name
       when "QualityDetail"
@@ -549,26 +550,31 @@ module ExportHelper
         dp_model = QualityDetailDataPoint
         q_column = "quality_detail_id"
         field_column = "quality_detail_field_id"
+        linked_t1_column = "outcome_id"
       when "ArmDetail"
         field_model = ArmDetailField
         dp_model = ArmDetailDataPoint
         q_column = "arm_detail_id"
         field_column = "arm_detail_field_id"
+        linked_t1_column = "arm_id"
       when "DiagnosticTestDetail"
         field_model = DiagnosticTestDetailField
         dp_model = DiagnosticTestDetailDataPoint
         q_column = "diagnostic_test_detail_id"
         field_column = "diagnostic_test_detail_field_id"
+        linked_t1_column = "diagnostic_test_id"
       when "OutcomeDetail"
         field_model = OutcomeDetailField
         dp_model = OutcomeDetailDataPoint
         q_column = "outcome_detail_id"
         field_column = "outcome_detail_field_id"
+        linked_t1_column = "outcome_id"
       when "BaselineCharacteristic"
         field_model = BaselineCharacteristicField
         dp_model = BaselineCharacteristicDataPoint
         q_column = "baseline_characteristic_id"
         field_column = "baseline_characteristic_field_id"
+        linked_t1_column = "diagnostic_test_id"
       when "DesignDetail"
         field_model = DesignDetailField
         dp_model = DesignDetailDataPoint
@@ -642,17 +648,23 @@ module ExportHelper
           end
         end
 
-        dparr = dp_model.where(field_column => q.id)
-
-        ridarr = []
-        if dparr.present?
-          dparr.each do |dp|
-            if dp.subquestion_value.present?
-              sq_dict[dp.value].data_points << DataPointWrapper.new(dp, dp.subquestion_value)
-            end
-            ridarr << answer_dict[dp.value]
-            qrc.data_points << DataPointWrapper.new(dp,"[" + ridarr.join(", ") + "]")
+        dpdict = {}
+        dp_model.where(field_column => q.id).each do |dp|
+          if dp.subquestion_value.present?
+            sq_dict[dp.value].data_points << DataPointWrapper.new(dp, dp.subquestion_value)
           end
+          if linked_t1_column.present?
+            dpdict[dp.public_send(linked_t1_column)] ||= []
+            dpdict[dp.public_send(linked_t1_column)] << dp
+          else 
+            dpdict["no_linked_t1"] ||= []
+            dpdict["no_linked_t1"] << dp
+          end
+        end
+
+        dpdict.each do |t1_id, dparr|
+          ridarr = dparr.map{|dp| answer_dict[dp.value]}
+          qrc.data_points << DataPointWrapper.new(dparr.first,"[" + ridarr.join(", ") + "]")
         end
 
       when "radio"
@@ -676,10 +688,9 @@ module ExportHelper
             qr.question_row_columns << qrc
             @question_rows << other_qr
 
-
-            dp = dp_model.where(field_column => f.id).first
-            if dp then qrc.data_points << DataPointWrapper.new(dp) end
-
+            dp_model.where(field_column => f.id).each do |dp|
+              if dp then qrc.data_points << DataPointWrapper.new(dp) end
+            end
             next
           end
 
@@ -702,9 +713,7 @@ module ExportHelper
         end
 
           #TODO: WHERE IS THE EXTRACTION ASSOCIATION, DUMMY
-        dp = dp_model.where(field_column => q.id).first
-
-        if dp.present?
+        dp_model.where(field_column => q.id).each do |dp|
           if dp.subquestion_value.present?
             begin
               sq_dict[dp.value].data_points << DataPointWrapper.new(dp, dp.subquestion_value)
@@ -740,10 +749,9 @@ module ExportHelper
             qr.question_row_columns << qrc
             @question_rows << qr
 
-          #TODO: WHERE IS THE EXTRACTION ASSOCIATION, DUMMY
-            dp = dp_model.where(field_column => f.id).first
-            if dp then qrc.data_points << DataPointWrapper.new(dp) end
-
+            dp_model.where(field_column => f.id).each do |dp|
+              if dp then qrc.data_points << DataPointWrapper.new(dp) end
+            end
             next
           end
 
@@ -765,10 +773,7 @@ module ExportHelper
           end
         end
 
-        dp = dp_model.where(field_column => q.id).first
-          #TODO: WHERE IS THE EXTRACTION ASSOCIATION, DUMMY
-
-        if dp.present?
+        dp_model.where(field_column => q.id).each do |dp|
           if dp.subquestion_value.present?
             begin
               sq_dict[dp.value].data_points << DataPointWrapper.new(dp, dp.subquestion_value)
@@ -782,7 +787,6 @@ module ExportHelper
           end
           qrc.data_points << DataPointWrapper.new(dp, answer_dict[dp.value])
         end
-        
       when "matrix_checkbox"
         r_farr = field_model.where(q_column => q.id, :column_number => 0).order(row_number: :asc)
         c_farr = field_model.where(q_column => q.id, :row_number => 0).order(column_number: :asc)
@@ -801,10 +805,9 @@ module ExportHelper
             qr.question_row_columns << qrc
             other_qr = qr
 
-            dp = dp_model.where(:row_field_id => rf.id).first
-          #TODO: WHERE IS THE EXTRACTION ASSOCIATION, DUMMY
-            if dp then qrc.data_points << DataPointWrapper.new(dp) end
-
+            dp_model.where(:row_field_id => rf.id).each do |dp|
+              if dp then qrc.data_points << DataPointWrapper.new(dp) end
+            end
             next
           end
 
@@ -820,7 +823,6 @@ module ExportHelper
             answer_dict[cf.option_text] = option_id.to_s
 
             if cf.has_subquestion
-              ## how to add subquestion to extraction_form??
               sq = QuestionWrapper.new(cf.option_text + "..." + cf.subquestion)
               sq.key_questions_projects = @key_questions_projects
               sq.dependencies << DependencyWrapper.new("QuestionRowColumnsQuestionRowColumnOption", option_id)
@@ -835,17 +837,23 @@ module ExportHelper
             end
           end
 
-          dparr = dp_model.where(:row_field_id => rf.id)
-
-          ridarr = []
-          if dparr.present?
-            dparr.each do |dp|
-              if dp.subquestion_value.present?
-                sq_dict[answer_dict[dp.value]].data_points << DataPointWrapper.new(dp, dp.subquestion_value)
-              end
-              ridarr << answer_dict[dp.value]
-              qrc.data_points << DataPointWrapper.new(dp, "[" + ridarr.join(", ") + "]")
+          dpdict = {}
+          dp_model.where(:row_field_id => rf.id).each do |dp|
+            if dp.subquestion_value.present?
+              sq_dict[dp.value].data_points << DataPointWrapper.new(dp, dp.subquestion_value)
             end
+            if linked_t1_column.present?
+              dpdict[dp.public_send(linked_t1_column)] ||= []
+              dpdict[dp.public_send(linked_t1_column)] << dp
+            else 
+              dpdict["no_linked_t1"] ||= []
+              dpdict["no_linked_t1"] << dp
+            end
+            end
+
+          dpdict.each do |t1_id, dparr|
+            ridarr = dparr.map{|dp| answer_dict[dp.value]}
+            qrc.data_points << DataPointWrapper.new(dparr.first,"[" + ridarr.join(", ") + "]")
           end
         end
 
@@ -872,10 +880,9 @@ module ExportHelper
             qr.question_row_columns << qrc
             other_qr = qr
 
-            dp = dp_model.where(:row_field_id => rf.id).first
-          #TODO: WHERE IS THE EXTRACTION ASSOCIATION, DUMMY
-            if dp then qrc.data_points << DataPointWrapper.new(dp) end
-
+            dp_model.where(:row_field_id => rf.id).each do |dp|
+              if dp then qrc.data_points << DataPointWrapper.new(dp) end
+            end
             next
           end
 
@@ -906,10 +913,7 @@ module ExportHelper
             end
           end
 
-          dp = dp_model.where(:row_field_id => rf.id).first
-          #TODO: WHERE IS THE EXTRACTION ASSOCIATION, DUMMY
-
-          if dp.present?
+          dp_model.where(:row_field_id => rf.id).each do |dp|
             if dp.subquestion_value.present?
               sq_dict[answer_dict[dp.value]].data_points << DataPointWrapper.new(dp, dp.subquestion_value)
             end
@@ -933,7 +937,7 @@ module ExportHelper
         other_qr = nil
 
         r_farr.each do |rf|
-          if rf.row_number == -1
+          if rf.row_number == -1 
             qr = QuestionRowWrapper.new("Other: ")
             qrc = QuestionRowColumnWrapper.new("","text") ## set type inside qrc
             qrcf = QuestionRowColumnFieldWrapper.new
@@ -941,10 +945,9 @@ module ExportHelper
             qr.question_row_columns << qrc
             other_qr = qr
 
-            dp = dp_model.where(:row_field_id => rf.id).first
-          #TODO: WHERE IS THE EXTRACTION ASSOCIATION, DUMMY
-            if dp then qrc.data_points << DataPointWrapper.new(dp) end
-
+            dp_model.where(:row_field_id => rf.id).each do |dp|
+              if dp then qrc.data_points << DataPointWrapper.new(dp) end
+            end
             next
           end
 
@@ -954,19 +957,29 @@ module ExportHelper
             answer_dict = {}
             sq = nil
 
-            qrc = QuestionRowColumnWrapper.new(cf.option_text,"dropdown") ## set type inside qrc
+            dropdown_options = []
+            MatrixDropdownOption.where(row_id: rf.id, column_id: cf.id).each do |op|
+              dropdown_options << op
+            end
+
+            qrc = nil
+            if not dropdown_options.empty?
+              qrc = QuestionRowColumnWrapper.new(cf.option_text,"dropdown") ## set type inside qrc
+              dropdown_options.each do |op|
+                option_id = qrc.add_answer_choice(op.option_text)
+                answer_dict[op.option_text] = option_id.to_s
+              end
+            else
+              qrc = QuestionRowColumnWrapper.new(cf.option_text,"text") ## set type inside qrc
+            end
+
             qrcf = QuestionRowColumnFieldWrapper.new
             qrc.question_row_column_fields << qrcf
             qr.question_row_columns << qrc
             @question_rows << qr
 
-            MatrixDropdownOption.where(row_id: rf.id, column_id: cf.id).each do |op|
-              option_id = qrc.add_answer_choice(op.option_text)
-              answer_dict[op.option_text] = option_id.to_s
-            end
-
             if q.include_other_as_option
-              option_id = qrc.add_answer_choice("Other")
+              option_id = qrc.add_answer_choice("Other...")
               answer_dict["Other"] = option_id.to_s
               ## how to add subquestion to extraction_form??
               sq = QuestionWrapper.new(rf.option_text + "-" + cf.option_text + "...Other")
@@ -981,14 +994,11 @@ module ExportHelper
               @subquestions << sq
             end
 
-            dp = dp_model.where(:row_field_id => rf.id, :column_field_id => cf.id).first
-          #TODO: WHERE IS THE EXTRACTION ASSOCIATION, DUMMY
-
-            if dp.present?
-              #TODO Subquestion value is not relevant here
-              #TODO data_points are not properly associated with extractions
-              #TODO 
-              if answer_dict[dp.value].nil?
+            dp_model.where(:row_field_id => rf.id, :column_field_id => cf.id).each do |dp|
+              if dropdown_options.empty?
+                qrc.data_points << DataPointWrapper.new(dp)
+              elsif answer_dict[dp.value].nil?
+                qrc.data_points << DataPointWrapper.new(dp, answer_dict["Other..."])
                 sqrc.data_points << DataPointWrapper.new(dp)
               else
                 qrc.data_points << DataPointWrapper.new(dp, answer_dict[dp.value])
@@ -1156,6 +1166,16 @@ module ExportHelper
       end
     end
 
+    def create_total_arm
+      self.extractions_extraction_forms_projects_sections.each do |eefps|
+        if eefps.extraction_forms_projects_section.section.name == "Arms"
+          debugger
+          t1 = Type1Wrapper.new("Total", "")
+          eefpst1 = ExtractionsExtractionFormsProjectsSectionsType1Wrapper.new(self, t1, nil, nil, "Arm", 0)
+          eefps.extractions_extraction_forms_projects_sections_type1s << eefpst1
+        end
+      end
+    end
     def self.find_extraction(study_id); @@id_dict[study_id] end
   end
 
@@ -1172,7 +1192,7 @@ module ExportHelper
         #TODO: this is not the only way to make this comparison, extraction should know its study_id
         #TODO: this is not the only way to make this comparison, extraction should know its study_id
 
-        dp_eefpst1 = ExtractionsExtractionFormsProjectsSectionsType1Wrapper.find_eefpst1 dp.t1_type, dp.t1_id
+        dp_eefpst1 = ExtractionsExtractionFormsProjectsSectionsType1Wrapper.find_eefpst1 eefps.extraction.id, dp.t1_type, dp.t1_id
         if dp.study_id == eefps.extraction.citations_project.id
           @records << RecordWrapper.new(dp.name, dp_eefpst1)
         end
@@ -1295,8 +1315,9 @@ module ExportHelper
       @type1 = t1
       @extractions_extraction_forms_projects_section = eefps
 
-      @@table_dict[table_name] ||= {}
-      @@table_dict[table_name][table_id] = self
+      @@table_dict[eefps.extraction.id] ||= {"self" => eefps.extraction}
+      @@table_dict[eefps.extraction.id][table_name] ||= {}
+      @@table_dict[eefps.extraction.id][table_name][table_id] = self
 
       @extractions_extraction_forms_projects_sections_type1_rows = []
 
@@ -1306,25 +1327,177 @@ module ExportHelper
 
     def create_populations(outcome_id)
       OutcomeSubgroup.where(outcome_id: outcome_id).each do |os|
-        @extractions_extraction_forms_projects_sections_type1_rows << ExtractionsExtractionFormsProjectsSectionsType1RowWrapper.new(os)
+        @extractions_extraction_forms_projects_sections_type1_rows << ExtractionsExtractionFormsProjectsSectionsType1RowWrapper.new(self, os)
       end
     end
-    def self.find_eefpst1(table_name, table_id); @@table_dict[table_name][table_id] end
+
+    def self.find_eefpst1(ex_id, table_name, table_id)
+      if table_name = "Arm" and table_id == 0 and @@table_dict[ex_id][table_name][table_id].nil?
+        debugger
+        @@table_dict[ex_id]["self"].create_total_arm
+      end
+      @@table_dict[ex_id][table_name][table_id] 
+    end
   end
 
   class ExtractionsExtractionFormsProjectsSectionsType1RowWrapper
     attr_accessor :id, :population_name, :result_statistic_sections, :extractions_extraction_forms_projects_sections_type1_row_columns
-    def initialize os
+    def initialize eefpst1, os
+      @eefpst1 = eefpst1
+      @extraction = eefpst1.extractions_extraction_forms_projects_section.extraction
       @id = os.id
       @population_name = PopulationNameWrapper.new(os.title, os.description)
       @result_statistic_sections = [] #TODO THIS IS SUPPOSED TO BE COMPLICATED
       @extractions_extraction_forms_projects_sections_type1_row_columns = []
 
+      @tp_dict = {}
       OutcomeTimepoint.where(outcome_id: os.outcome_id).each do |ot|
-        @extractions_extraction_forms_projects_sections_type1_row_columns << ExtractionsExtractionFormsProjectsSectionsType1RowColumnWrapper.new(ot)
+        eefpst1r = ExtractionsExtractionFormsProjectsSectionsType1RowColumnWrapper.new(ot)
+        @extractions_extraction_forms_projects_sections_type1_row_columns << eefpt1r
+        @tp_dict[ot.id] = eefpst1r
+      end
+
+      o = Outcome.find(os.outcome_id)
+      ode_arr = OutcomeDataEntry.includes([:outcome_measures => :outcome_data_points]).where(outcome_id: o.id)
+      bac_arr = Comparison.includes([{:comparison_measures => :comparison_data_points}, :comparators]).where(outcome_id: o.id, within_or_between: "between")
+      wac_arr = Comparison.includes([{:comparison_measures => :comparison_data_points}, :comparators]).where(outcome_id: o.id, within_or_between: "within")
+
+      #we need 4 rss
+      ds_rss = ResultStatisticSectionWrapper.new("Descriptive Statistics")
+      ode_arr.each do |ode|
+        ode.outcome_measures.each do |om|
+          rssm = ResultStatisticSectionsMeasureWrapper.new om.title
+          tp = @tp_dict[ode.timepoint_id]
+
+          om.outcome_data_points.each do |odp|
+            record_name = odp.value
+            arm_eefpst1 = ExtractionsExtractionFormsProjectsSectionsType1Wrapper.find_eefpst1(@extraction, 'Arm', odp.arm_id) 
+            rssm.tps_arms_rssms << LoyloyWrapper.new 
+          end
+          ds_rss.result_statistic_section_measures << rssm
+        end
+      end
+      bac_rss = ResultStatisticSectionWrapper.new("Between Arm Comparisons")
+      bac_arr.each do |comparison|
+        comparison.comparators.each do |comparator|
+          case comparison.within_or_between
+          when "within"
+            tparr = comparator.comparator.split "_"
+            tp_1 = @tp_dict[tparr.first]
+            tp_2 = @tp_dict[tparr.second]
+            bac_rss.comparisons << ComparisonWrapper.new(tp_1, tp_2)
+          when "between"
+            armarr = comparator.comparator.split "_"
+            arm_1 = @tp_dict[tparr.first]
+            arm_2 = @tp_dict[tparr.second]
+            bac_rss.comparisons << ComparisonWrapper.new(arm_1, arm_2)
+          end
+        end
+      end
+      wac_rss = ResultStatisticSectionWrapper.new("Within Arm Comparisons")
+      net_rss = ResultStatisticSectionWrapper.new("NET Change")
+      @result_statistic_sections << ds_rss
+      @result_statistic_sections << bac_rss
+      @result_statistic_sections << wac_rss
+      @result_statistic_sections << net_rss
+    end
+
+    def get_tp tpid; @tp_dict[tpid] end
+  end
+
+  class LoyloyWrapper ## GENERIC CLASS FOR HOLDING tps_arms_rssm, comparisons_arms_rssms, tps_comparisons_rssms, wacs_bacs_rssms
+    attr_accessor :id, :comparison, :timepoint, :extractions_extraction_forms_projects_sections_type1, :wac, :bac, :record
+    @@id_counter = 1
+    def initialize tp, arm, comparison, wac, bac, record_name
+      @id = @@id_counter
+      @@id_counter += 1
+      @timepoint = tp
+      @extractions_extraction_forms_projects_sections_type1 = arm
+      @record = ResultRecordWrapper.new record_name
+      @wac = wac
+      @bac = bac
+    end
+  end
+
+  class ResultRecordWrapper
+    attr_accessor :name, :id
+    @@id_counter = 1
+    def initialize name
+      @id = @@id_counter
+      @@id_counter += 1
+      @name = name
+    end
+  end
+
+  class ResultStatisticSectionWrapper
+    attr_accessor :id, :result_statistic_section_type, :comparisons, :result_statistic_section_measures
+    @@id_counter = 1
+    def initialize rss_type, de_arr
+      @id = @@id_counter
+      @@id_counter += 1
+      @result_statistic_section_measures = []
+      @result_statistic_section_type = ResultStatisticSectionTypeWrapper.name rss_type
+      @comparisons = []
+
+      case rss_type
+        when "Descriptive Statistics"
+
+        when "Between Arm Comparisons"
+        when "Within Arm Comparisons"
+        when "NET Change"
+          ##NOTHING
+        end
+    end
+
+    def create_comparisons comp_arr
+    end
+  end
+
+  class ResultStatisticSectionTypeWrapper
+    attr_accessor :id, :name
+    @@id_dict = {}
+    @@id_counter = 1
+    def initialize name
+      @name = name
+      if @@id_dict[name]
+        @id = @@id_dict[name]
+      else
+        @id = @@id_counter
+        @@id_counter += 1
+        @@id_dict[name] = @id
       end
     end
   end
+
+  class ResultStatisticSectionsMeasureWrapper
+    attr_accessor :id, :measure, :tps_comparisons_rssms, :tps_arms_rssms, :comparisons_arms_rssms, :wacs_bacs_rssms
+    @@id_counter = 1
+    def initialize measure_name
+      @id = @@id_counter
+      @@id_counter += 1
+      @measure = MeasureWrapper.new(measure_name)
+
+      @tps_comparisons_rssms = []
+      @tps_arms_rssms = []
+      @comparisons_arms_rssms = []
+      @wacs_bacs_rssms = []
+    end
+  end
+
+  class MeasureWrapper
+    attr_accessor :id, :name
+    @@id_counter = 1
+    @@id_dict = {}
+    def initialize name
+      if @@id_dict[name]
+        @id = @@id_dict[name]
+      else
+        @id = @@id_counter
+        @@id_counter += 1
+        @@id_dict[name] = @id
+      end
+      @name = name
+    end
 
   class ExtractionsExtractionFormsProjectsSectionsType1RowColumnWrapper
     attr_accessor :id, :timepoint_name
