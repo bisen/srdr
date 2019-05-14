@@ -229,6 +229,17 @@ module ExportHelper
     end
   end
 
+  class ExtractionFormsProjectsSectionOptionWrapper
+    attr_accessor :id, :by_type1, :include_total
+    @@id_counter = 1
+    def initialize(by_t1, total)
+      @id = @@id_counter
+      @@id_counter += 1
+      @by_type1 = by_t1 || false
+      @include_total = total || false
+    end
+  end
+
   class ExtractionFormsProjectWrapper
     attr_accessor :t1_efps, :t2_efps, :other_efps
     def initialize ef, p
@@ -255,7 +266,7 @@ module ExportHelper
         when "diagnostic_tests"
           @t1_efps << efps
           diagnostic_tests_efps = efps
-        when "arm_details","outcome_details", "quality_details", "diagnostic_test_details"
+        when "quality", "arm_details","outcome_details", "quality_details", "diagnostic_test_details","design","design"
           @t2_efps << efps
         else
           @other_efps << efps
@@ -265,17 +276,32 @@ module ExportHelper
       @t2_efps.each do |efps|
         case efps.efs.section_name
         when "arm_details"
-          if EfSectionOption.where(extraction_form_id: ef.id, section: "arm_detail").first.by_arm
+          efso = EfSectionOption.where(extraction_form_id: ef.id, section: "arm_detail").first
+          if efso.by_arm
             efps.link_to_type1 = arms_efps
+            efps.extraction_forms_projects_section_option = ExtractionFormsProjectsSectionOptionWrapper.new true, efso.include_total
+          else
+            efps.extraction_forms_projects_section_option = ExtractionFormsProjectsSectionOptionWrapper.new false, efso.include_total
           end
         when "outcome_details", "quality_details"
-          if EfSectionOption.where(extraction_form_id: ef.id, section: "outcome_detail").first.by_outcome
+          efso = EfSectionOption.where(extraction_form_id: ef.id, section: "outcome_detail").first
+          if efso.by_outcome
             efps.link_to_type1 = outcomes_efps
+            efps.extraction_forms_projects_section_option = ExtractionFormsProjectsSectionOptionWrapper.new true, efso.include_total
+          else
+            efps.extraction_forms_projects_section_option = ExtractionFormsProjectsSectionOptionWrapper.new false, efso.include_total
           end
         when "diagnostic_test_details"
-          if EfSectionOption.where(extraction_form_id: ef.id, section: "diagnostic_test").first.by_diagnostic_test
+          efso = EfSectionOption.where(extraction_form_id: ef.id, section: "diagnostic_test").first
+          if efso.by_diagnostic_test
             efps.link_to_type1 = diagnostic_tests_efps
+            efps.extraction_forms_projects_section_option = ExtractionFormsProjectsSectionOptionWrapper.new true, efso.include_total
+          else
+            efps.extraction_forms_projects_section_option = ExtractionFormsProjectsSectionOptionWrapper.new false, efso.include_total
           end
+
+        when "design", "quality"
+          efps.extraction_forms_projects_section_option = ExtractionFormsProjectsSectionOptionWrapper.new false, false
         end
       end
 
@@ -298,13 +324,13 @@ module ExportHelper
       @efs = efs
       @ordering = OrderingWrapper.new 1 ##TODO: ALL OF THE POSITIONS ARE THE SAME
       @extraction_forms_projects_sections_type1s = []
+      @extraction_forms_projects_section_option = nil
       @link_to_type1 = nil## TODO: link to right section
       @questions = []
       case efs.section_name
       when "adverse"
-        @extraction_forms_projects_section_option #TODO What to do with this
         @section = SectionWrapper.new "Adverse Events"
-        @extraction_forms_projects_section_type = ExtractionFormsProjectsSectionTypeWrapper.new "Type 1"
+        @extraction_forms_projects_section_type = ExtractionFormsProjectsSectionTypeWrapper.new "Type 2"
         AdverseEvent.where( extraction_form_id: efs.extraction_form.id ).each do |ae|
           @extraction_forms_projects_sections_type1s << ExtractionFormsProjectsSectionsType1Wrapper.new(ae.title, ae.description)
         end
@@ -403,7 +429,6 @@ module ExportHelper
         fixed_position += 1
       end
     end
-
   end
 
   class SectionWrapper
@@ -443,20 +468,6 @@ module ExportHelper
     end
   end
 
-  class ExtractionFormsProjectsSectionOptionWrapper
-    #does this ever get used
-    @@id_counter = 1
-    def initialize type
-      @id = @@id_counter
-      @by_type1 = false
-      @include_total = false
-    end
-
-    def by_type1; @by_type1 end
-    def include_total; @include_total end
-    def id; @id end
-  end
-
   class ExtractionFormsProjectsSectionsType1Wrapper
     @@id_counter = 1
     def initialize(name, description)
@@ -476,11 +487,11 @@ module ExportHelper
     @@id_dict = {}
     @@id_counter = 1
     def initialize(name, description)
-      if @@id_dict[name + "-----" + description]
-        @id = @@id_dict[name + "-----" + description]
+      if @@id_dict[(name || "") + "-----" + (description || "")]
+        @id = @@id_dict[(name || "") + "-----" + (description || "")]
       else
         @id = @@id_counter
-        @@id_dict[name + "-----" + description] = @id
+        @@id_dict[(name || "") + "-----" + (description || "")] = @id
         @@id_counter += 1
       end
       @name = name
@@ -490,7 +501,7 @@ module ExportHelper
     def id; @id end
     def name; @name end
     def description; @description end
-    def self.get_t1_id(name,description); @@id_dict[name + "-----" + description] end
+    def self.get_t1_id(name,description); @@id_dict[(name || "") + "-----" + (description || "")] end
   end
 
   class QuestionWrapper
@@ -634,7 +645,7 @@ module ExportHelper
 
           if f.has_subquestion
             ## how to add subquestion to extraction_form??
-            sq = QuestionWrapper.new(f.option_text + "..." + f.subquestion)
+            sq = QuestionWrapper.new((f.option_text || "") + "..." + (f.subquestion || ""))
             sq.key_questions_projects = @key_questions_projects
             sq.dependencies << DependencyWrapper.new("QuestionRowColumnsQuestionRowColumnOption", option_id)
             sqr = QuestionRowWrapper.new("")
@@ -698,7 +709,7 @@ module ExportHelper
           answer_dict[f.option_text] = option_id.to_s
 
           if f.has_subquestion
-            sq = QuestionWrapper.new(f.option_text + "..." + f.subquestion)
+            sq = QuestionWrapper.new((f.option_text || "") + "..." + (f.subquestion || ""))
             sq.key_questions_projects = @key_questions_projects
             sq.dependencies << DependencyWrapper.new("QuestionRowColumnsQuestionRowColumnOption", option_id)
             sqr = QuestionRowWrapper.new("")
@@ -759,7 +770,7 @@ module ExportHelper
           answer_dict[f.option_text] = option_id.to_s
 
           if f.has_subquestion
-            sq = QuestionWrapper.new(f.option_text + "..." + f.subquestion)
+            sq = QuestionWrapper.new((f.option_text || "") + "..." + (f.subquestion || ""))
             sq.key_questions_projects = @key_questions_projects
             sq.dependencies << DependencyWrapper.new("QuestionRowColumnsQuestionRowColumnOption", option_id)
             sqr = QuestionRowWrapper.new("")
@@ -823,7 +834,7 @@ module ExportHelper
             answer_dict[cf.option_text] = option_id.to_s
 
             if cf.has_subquestion
-              sq = QuestionWrapper.new(cf.option_text + "..." + cf.subquestion)
+              sq = QuestionWrapper.new((f.option_text || "") + "..." + (f.subquestion || ""))
               sq.key_questions_projects = @key_questions_projects
               sq.dependencies << DependencyWrapper.new("QuestionRowColumnsQuestionRowColumnOption", option_id)
               sqr = QuestionRowWrapper.new("")
@@ -899,7 +910,7 @@ module ExportHelper
 
             if cf.has_subquestion
               ## how to add subquestion to extraction_form??
-              sq = QuestionWrapper.new(cf.option_text + "..." + cf.subquestion)
+              sq = QuestionWrapper.new((f.option_text || "") + "..." + (f.subquestion || ""))
               sq.key_questions_projects = @key_questions_projects
               sq.dependencies << DependencyWrapper.new("QuestionRowColumnsQuestionRowColumnOption", option_id)
               sqr = QuestionRowWrapper.new("")
@@ -982,7 +993,7 @@ module ExportHelper
               option_id = qrc.add_answer_choice("Other...")
               answer_dict["Other"] = option_id.to_s
               ## how to add subquestion to extraction_form??
-              sq = QuestionWrapper.new(rf.option_text + "-" + cf.option_text + "...Other")
+              sq = QuestionWrapper.new((rf.option_text || "") + "-" + (cf.option_text || "") + "...Other")
               sq.key_questions_projects = @key_questions_projects
               sq.dependencies << DependencyWrapper.new("QuestionRowColumnsQuestionRowColumnOption", option_id)
               sqr = QuestionRowWrapper.new("")
@@ -1077,14 +1088,14 @@ module ExportHelper
   class QuestionRowColumnTypeWrapper
     attr_accessor :name, :id
     @@id_dict = { "text" => 1,
-               "numeric" => 2,
-               "numeric_range" => 3,
-               "scientific" => 4,
-               "checkbox" => 5,
-               "dropdown" => 6,
-               "radio" => 7,
-               "select2_single" => 8,
-               "select2_multi" => 9 }
+                  "numeric" => 2,
+                  "numeric_range" => 3,
+                  "scientific" => 4,
+                  "checkbox" => 5,
+                  "dropdown" => 6,
+                  "radio" => 7,
+                  "select2_single" => 8,
+                  "select2_multi" => 9 }
     def initialize name
       @name = name
       @id = @@id_dict[name]
@@ -1169,9 +1180,8 @@ module ExportHelper
     def create_total_arm
       self.extractions_extraction_forms_projects_sections.each do |eefps|
         if eefps.extraction_forms_projects_section.section.name == "Arms"
-          debugger
-          t1 = Type1Wrapper.new("Total", "")
-          eefpst1 = ExtractionsExtractionFormsProjectsSectionsType1Wrapper.new(self, t1, nil, nil, "Arm", 0)
+          t1 = Type1Wrapper.new("Total", "including all interventions")
+          eefpst1 = ExtractionsExtractionFormsProjectsSectionsType1Wrapper.new(eefps, t1, nil, nil, "Arm", 0)
           eefps.extractions_extraction_forms_projects_sections_type1s << eefpst1
         end
       end
@@ -1185,13 +1195,6 @@ module ExportHelper
       @question_row_column_field = qrc.question_row_column_fields.first
       @records = []
       qrc.data_points.each do |dp|
-        #@dp_extraction = ExtractionWrapper.find_extraction(dp.study_id)
-        #TODO: this is not the only way to make this comparison, extraction should know its study_id
-        #TODO: this is not the only way to make this comparison, extraction should know its study_id
-        #TODO: this is not the only way to make this comparison, extraction should know its study_id
-        #TODO: this is not the only way to make this comparison, extraction should know its study_id
-        #TODO: this is not the only way to make this comparison, extraction should know its study_id
-
         dp_eefpst1 = ExtractionsExtractionFormsProjectsSectionsType1Wrapper.find_eefpst1 eefps.extraction.id, dp.t1_type, dp.t1_id
         if dp.study_id == eefps.extraction.citations_project.id
           @records << RecordWrapper.new(dp.name, dp_eefpst1)
@@ -1333,7 +1336,6 @@ module ExportHelper
 
     def self.find_eefpst1(ex_id, table_name, table_id)
       if table_name = "Arm" and table_id == 0 and @@table_dict[ex_id][table_name][table_id].nil?
-        debugger
         @@table_dict[ex_id]["self"].create_total_arm
       end
       @@table_dict[ex_id][table_name][table_id] 
@@ -1352,17 +1354,17 @@ module ExportHelper
 
       @tp_dict = {}
       OutcomeTimepoint.where(outcome_id: os.outcome_id).each do |ot|
-        eefpst1r = ExtractionsExtractionFormsProjectsSectionsType1RowColumnWrapper.new(ot)
-        @extractions_extraction_forms_projects_sections_type1_row_columns << eefpt1r
-        @tp_dict[ot.id] = eefpst1r
+        eefpst1rc = ExtractionsExtractionFormsProjectsSectionsType1RowColumnWrapper.new(ot)
+        @extractions_extraction_forms_projects_sections_type1_row_columns << eefpst1rc
+        @tp_dict[ot.id] = eefpst1rc
       end
 
       o = Outcome.find(os.outcome_id)
-      ode_arr = OutcomeDataEntry.includes([:outcome_measures => :outcome_data_points]).where(outcome_id: o.id)
-      bac_arr = Comparison.includes([{:comparison_measures => :comparison_data_points}, :comparators]).where(outcome_id: o.id, within_or_between: "between")
-      wac_arr = Comparison.includes([{:comparison_measures => :comparison_data_points}, :comparators]).where(outcome_id: o.id, within_or_between: "within")
+      ode_arr = OutcomeDataEntry.includes([:outcome_measures => :outcome_data_points]).where(outcome_id: o.id, subgroup_id: os.id)
+      bac_arr = Comparison.includes([{:comparison_measures => :comparison_data_points}, :comparators]).where(outcome_id: o.id, within_or_between: "between", subgroup_id: os.id)
+      wac_arr = Comparison.includes([{:comparison_measures => :comparison_data_points}, :comparators]).where(outcome_id: o.id, within_or_between: "within", subgroup_id: os.id)
 
-      #we need 4 rss
+      #tps_arms_rssms
       ds_rss = ResultStatisticSectionWrapper.new("Descriptive Statistics")
       ode_arr.each do |ode|
         ode.outcome_measures.each do |om|
@@ -1371,30 +1373,92 @@ module ExportHelper
 
           om.outcome_data_points.each do |odp|
             record_name = odp.value
-            arm_eefpst1 = ExtractionsExtractionFormsProjectsSectionsType1Wrapper.find_eefpst1(@extraction, 'Arm', odp.arm_id) 
-            rssm.tps_arms_rssms << LoyloyWrapper.new 
+            arm_eefpst1 = ExtractionsExtractionFormsProjectsSectionsType1Wrapper.find_eefpst1(@extraction.id, 'Arm', odp.arm_id) 
+            rssm.tps_arms_rssms << LoyloyWrapper.new(tp, arm_eefpst1, nil, odp.value)
           end
-          ds_rss.result_statistic_section_measures << rssm
+          ds_rss.result_statistic_sections_measures << rssm
         end
       end
+
+      #comparisons_arms_rssms
+      wac_rss = ResultStatisticSectionWrapper.new("Within Arm Comparisons")
+      wac_arr.each do |comparison|
+        comp_dict = {}
+        comparison.comparators.each do |comparator|
+          if comparator.comparator != nil and comparator.comparator != ""
+            if comparator.comparator == "000"
+              new_comp =  ComparisonWrapper.new( true )
+              wac_rss.comparisons << new_comp
+              comp_dict[comparator.id] = new_comp
+            else
+              tparr = comparator.comparator.split "_"
+              tp_1 = @tp_dict[tparr.first]
+              tp_2 = @tp_dict[tparr.second]
+              new_comp =  ComparisonWrapper.new( false )
+              new_comp.add_comparate tp_1
+              new_comp.add_comparate tp_2
+              wac_rss.comparisons << new_comp
+              comp_dict[comparator.id] = new_comp
+            end
+          else
+            new_comp =  ComparisonWrapper.new( false )
+            wac_rss.comparisons << new_comp
+            comp_dict[comparator.id] = new_comp
+          end
+        end
+
+        comparison.comparison_measures.each do |cm|
+          rssm = ResultStatisticSectionsMeasureWrapper.new cm.title
+          cm.comparison_data_points.each do |cdp|
+            comp = comp_dict[cdp.comparator.id]
+            record_name = cdp.value
+            arm_eefpst1 = ExtractionsExtractionFormsProjectsSectionsType1Wrapper.find_eefpst1(@extraction.id, 'Arm', cdp.arm_id) 
+            rssm.comparisons_arms_rssms << LoyloyWrapper.new(nil, arm_eefpst1, comp, cdp.value)
+          end
+          wac_rss.result_statistic_sections_measures << rssm
+        end
+      end
+
+      #tps_comparisons_rssms
       bac_rss = ResultStatisticSectionWrapper.new("Between Arm Comparisons")
       bac_arr.each do |comparison|
+        comp_dict = {}
+
         comparison.comparators.each do |comparator|
-          case comparison.within_or_between
-          when "within"
-            tparr = comparator.comparator.split "_"
-            tp_1 = @tp_dict[tparr.first]
-            tp_2 = @tp_dict[tparr.second]
-            bac_rss.comparisons << ComparisonWrapper.new(tp_1, tp_2)
-          when "between"
-            armarr = comparator.comparator.split "_"
-            arm_1 = @tp_dict[tparr.first]
-            arm_2 = @tp_dict[tparr.second]
-            bac_rss.comparisons << ComparisonWrapper.new(arm_1, arm_2)
+          if comparator.comparator != nil and comparator.comparator != ""
+            if comparator.comparator == "000"
+              new_comp =  ComparisonWrapper.new( true )
+              bac_rss.comparisons << new_comp
+              comp_dict[comparator.id] = new_comp
+            else
+              armarr = comparator.comparator.split "_"
+              arm_1 = ExtractionsExtractionFormsProjectsSectionsType1Wrapper.find_eefpst1(@extraction.id, "Arm", armarr.first.to_i)
+              arm_2 = ExtractionsExtractionFormsProjectsSectionsType1Wrapper.find_eefpst1(@extraction.id, "Arm", armarr.second.to_i)
+              new_comp =  ComparisonWrapper.new( false )
+              new_comp.add_comparate arm_1
+              new_comp.add_comparate arm_2
+              bac_rss.comparisons << new_comp
+              comp_dict[comparator.id] = new_comp
+            end
+          else
+            new_comp =  ComparisonWrapper.new( false )
+            bac_rss.comparisons << new_comp
+            comp_dict[comparator.id] = new_comp
           end
         end
+
+        comparison.comparison_measures.each do |cm|
+          rssm = ResultStatisticSectionsMeasureWrapper.new cm.title
+          cm.comparison_data_points.each do |cdp|
+            comp = comp_dict[cdp.comparator.id]
+            record_name = cdp.value
+            tp = @tp_dict[comparison.group_id]
+            rssm.tps_comparisons_rssms << LoyloyWrapper.new(tp, nil, comp, cdp.value)
+          end
+          bac_rss.result_statistic_sections_measures << rssm
+        end
       end
-      wac_rss = ResultStatisticSectionWrapper.new("Within Arm Comparisons")
+
       net_rss = ResultStatisticSectionWrapper.new("NET Change")
       @result_statistic_sections << ds_rss
       @result_statistic_sections << bac_rss
@@ -1405,51 +1469,81 @@ module ExportHelper
     def get_tp tpid; @tp_dict[tpid] end
   end
 
-  class LoyloyWrapper ## GENERIC CLASS FOR HOLDING tps_arms_rssm, comparisons_arms_rssms, tps_comparisons_rssms, wacs_bacs_rssms
-    attr_accessor :id, :comparison, :timepoint, :extractions_extraction_forms_projects_sections_type1, :wac, :bac, :record
+  class LoyloyWrapper ## generic class for holding tps_arms_rssm, comparisons_arms_rssms, tps_comparisons_rssms, wacs_bacs_rssms
+    attr_accessor :id, :comparison, :timepoint, :extractions_extraction_forms_projects_sections_type1, :records
     @@id_counter = 1
-    def initialize tp, arm, comparison, wac, bac, record_name
+    def initialize tp, arm, comparison, record_name
       @id = @@id_counter
       @@id_counter += 1
       @timepoint = tp
+      @comparison = comparison
       @extractions_extraction_forms_projects_sections_type1 = arm
-      @record = ResultRecordWrapper.new record_name
-      @wac = wac
-      @bac = bac
-    end
-  end
 
-  class ResultRecordWrapper
-    attr_accessor :name, :id
-    @@id_counter = 1
-    def initialize name
-      @id = @@id_counter
-      @@id_counter += 1
-      @name = name
+      @records = [ RecordWrapper.new(record_name, nil) ]
     end
   end
 
   class ResultStatisticSectionWrapper
-    attr_accessor :id, :result_statistic_section_type, :comparisons, :result_statistic_section_measures
+    attr_accessor :id, :result_statistic_section_type, :comparisons, :result_statistic_sections_measures
     @@id_counter = 1
-    def initialize rss_type, de_arr
+    def initialize rss_type
       @id = @@id_counter
       @@id_counter += 1
-      @result_statistic_section_measures = []
-      @result_statistic_section_type = ResultStatisticSectionTypeWrapper.name rss_type
+      @result_statistic_sections_measures = []
+      @result_statistic_section_type = ResultStatisticSectionTypeWrapper.new rss_type
       @comparisons = []
+    end
+  end
 
-      case rss_type
-        when "Descriptive Statistics"
-
-        when "Between Arm Comparisons"
-        when "Within Arm Comparisons"
-        when "NET Change"
-          ##NOTHING
-        end
+  class ComparisonWrapper
+    attr_accessor :id, :comparate_groups, :is_anova
+    @@id_counter = 1
+    def initialize is_anova
+      @is_anova = is_anova
+      @id = @@id_counter
+      @@id_counter += 1
+      @comparate_groups = []
     end
 
-    def create_comparisons comp_arr
+    def add_comparate item
+      @comparate_groups << ComparateGroupWrapper.new(item)
+    end
+  end
+
+  class ComparateGroupWrapper
+    attr_accessor :id, :comparates
+    @@id_counter = 1
+    def initialize item
+      @id = @@id_counter
+      @@id_counter += 1
+      @comparates= []
+      @comparates << ComparateWrapper.new(item)
+    end
+  end
+
+  class ComparateWrapper
+    attr_accessor :id, :comparable_element
+    @@id_counter = 1
+    def initialize item
+      @id = @@id_counter
+      @@id_counter += 1
+      @comparable_element = ComparableElementWrapper.new(item)
+    end
+  end
+
+  class ComparableElementWrapper
+    attr_accessor :id, :comparable_type, :comparable_id
+    @@id_counter = 1
+    def initialize item
+      @id = @@id_counter
+      @@id_counter += 1
+      case item.class.name
+      when "ExportHelper::ExtractionsExtractionFormsProjectsSectionsType1RowColumnWrapper"
+        @comparable_type = "ExtractionsExtractionFormsProjectsSectionsType1RowColumn"
+      when "ExportHelper::ExtractionsExtractionFormsProjectsSectionsType1Wrapper"
+        @comparable_type = "ExtractionsExtractionFormsProjectsSectionsType1"
+      end
+      @comparable_id = item.id
     end
   end
 
@@ -1498,6 +1592,7 @@ module ExportHelper
       end
       @name = name
     end
+  end
 
   class ExtractionsExtractionFormsProjectsSectionsType1RowColumnWrapper
     attr_accessor :id, :timepoint_name
@@ -1563,15 +1658,18 @@ module ExportHelper
       @user_id = Study.find(dp.study_id)
       @t1_type = ""
       @t1_id = nil
-      if dp.respond_to? :arm_id
+      case dp.class.name
+      when "ArmDetailDataPoint"
         @t1_id = dp.arm_id
-        @t1_type = "Arm"
-      elsif dp.respond_to? :outcome_id
+        @t1_type = if @t1_id.present? then "Arm" else nil end
+      when "OutcomeDetailDataPoint"
         @t1_id = dp.outcome_id
-        @t1_type = "Outcome"
-      elsif dp.respond_to? :diagnostic_test_id
+        @t1_type = if @t1_id.present? then "Outcome" else nil end
+      when "DiagnosticTestDetailDataPoint"
         @t1_id = dp.diagnostic_test_id
-        @t1_type = "Diagnostic Test"
+        @t1_type = if @t1_id.present? then "Diagnostic Test" else nil end
+      when "DesignDetailDataPoint"
+      when "QualityDimensionDataPoint"
       end
       #case dp.class.name
       #when "ArmDetailDataPoint"
