@@ -254,7 +254,7 @@ module ExportHelper
       outcomes_efps = nil
       diagnostic_tests_efps = nil
 
-      ef.extraction_form_sections.where( included: true, section_name: ["adverse","arm_details","arms","baselines","design","outcome_details","outcomes","quality","results"] ).each do |s|
+      ef.extraction_form_sections.where( included: true, section_name: ["adverse","arm_details","arms","baselines","diagnostic_test_details", "diagnostic_tests", "design","outcome_details","outcomes","quality","results"] ).each do |s|
         efps = ExtractionFormsProjectsSectionWrapper.new(s)
         case s.section_name
         when "arms"
@@ -266,7 +266,7 @@ module ExportHelper
         when "diagnostic_tests"
           @t1_efps << efps
           diagnostic_tests_efps = efps
-        when "quality", "arm_details","outcome_details", "quality_details", "diagnostic_test_details","design","design"
+        when "quality", "arm_details","outcome_details", "quality_details", "diagnostic_test_details","design"
           @t2_efps << efps
         else
           @other_efps << efps
@@ -965,7 +965,7 @@ module ExportHelper
           qr = QuestionRowWrapper.new(rf.option_text)
 
           c_farr.each do |cf|
-            answer_dict = {}
+            answer_dict = {"" => ""}
             sq = nil
 
             dropdown_options = []
@@ -991,7 +991,7 @@ module ExportHelper
 
             if q.include_other_as_option
               option_id = qrc.add_answer_choice("Other...")
-              answer_dict["Other"] = option_id.to_s
+              answer_dict["<<<Other...>>>"] = option_id.to_s
               ## how to add subquestion to extraction_form??
               sq = QuestionWrapper.new((rf.option_text || "") + "-" + (cf.option_text || "") + "...Other")
               sq.key_questions_projects = @key_questions_projects
@@ -1006,10 +1006,11 @@ module ExportHelper
             end
 
             dp_model.where(:row_field_id => rf.id, :column_field_id => cf.id).each do |dp|
+              # if no options, then we have a cell that is just a textbox
               if dropdown_options.empty?
                 qrc.data_points << DataPointWrapper.new(dp)
               elsif answer_dict[dp.value].nil?
-                qrc.data_points << DataPointWrapper.new(dp, answer_dict["Other..."])
+                qrc.data_points << DataPointWrapper.new(dp, answer_dict["<<<Other...>>>"])
                 sqrc.data_points << DataPointWrapper.new(dp)
               else
                 qrc.data_points << DataPointWrapper.new(dp, answer_dict[dp.value])
@@ -1194,7 +1195,7 @@ module ExportHelper
     def initialize eefps, qrc
       @question_row_column_field = qrc.question_row_column_fields.first
       @records = []
-      qrc.data_points.each do |dp|
+        qrc.data_points.each do |dp|
         dp_eefpst1 = ExtractionsExtractionFormsProjectsSectionsType1Wrapper.find_eefpst1 eefps.extraction.id, dp.t1_type, dp.t1_id
         if dp.study_id == eefps.extraction.citations_project.id
           @records << RecordWrapper.new(dp.name, dp_eefpst1)
@@ -1335,10 +1336,12 @@ module ExportHelper
     end
 
     def self.find_eefpst1(ex_id, table_name, table_id)
-      if table_name = "Arm" and table_id == 0 and @@table_dict[ex_id][table_name][table_id].nil?
+      @@table_dict[ex_id] ||= {}
+      @@table_dict[ex_id][table_name] ||= {}
+      if table_name == "Arm" and table_id == 0 and @@table_dict[ex_id][table_name][table_id].nil?
         @@table_dict[ex_id]["self"].create_total_arm
       end
-      @@table_dict[ex_id][table_name][table_id] 
+      @@table_dict[ex_id][table_name][table_id]
     end
   end
 
@@ -1392,11 +1395,12 @@ module ExportHelper
               comp_dict[comparator.id] = new_comp
             else
               tparr = comparator.comparator.split "_"
-              tp_1 = @tp_dict[tparr.first]
-              tp_2 = @tp_dict[tparr.second]
+              tp_1 = @tp_dict[tparr.first.to_i]
+              tp_2 = @tp_dict[tparr.second.to_i]
+
               new_comp =  ComparisonWrapper.new( false )
-              new_comp.add_comparate tp_1
-              new_comp.add_comparate tp_2
+              if tp_1.present? then new_comp.add_comparate tp_1 end
+              if tp_2.present? then new_comp.add_comparate tp_2 end
               wac_rss.comparisons << new_comp
               comp_dict[comparator.id] = new_comp
             end
@@ -1435,8 +1439,8 @@ module ExportHelper
               arm_1 = ExtractionsExtractionFormsProjectsSectionsType1Wrapper.find_eefpst1(@extraction.id, "Arm", armarr.first.to_i)
               arm_2 = ExtractionsExtractionFormsProjectsSectionsType1Wrapper.find_eefpst1(@extraction.id, "Arm", armarr.second.to_i)
               new_comp =  ComparisonWrapper.new( false )
-              new_comp.add_comparate arm_1
-              new_comp.add_comparate arm_2
+              if arm_1.present? then new_comp.add_comparate arm_1 end
+              if arm_2.present? then new_comp.add_comparate arm_2 end
               bac_rss.comparisons << new_comp
               comp_dict[comparator.id] = new_comp
             end
