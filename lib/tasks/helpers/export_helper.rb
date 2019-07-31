@@ -283,7 +283,7 @@ module ExportHelper
           else
             efps.extraction_forms_projects_section_option = ExtractionFormsProjectsSectionOptionWrapper.new false, efso.include_total
           end
-        when "outcome_details", "quality_details"
+        when "outcome_details"
           efso = EfSectionOption.where(extraction_form_id: ef.id, section: "outcome_detail").first
           if efso.by_outcome
             efps.link_to_type1 = outcomes_efps
@@ -369,6 +369,7 @@ module ExportHelper
           @extraction_forms_projects_sections_type1s << ExtractionFormsProjectsSectionsType1Wrapper.new(efdt.title, efdt.description)
         end
 
+      #TODO: THIS DOES NOT WORK
       when "baselines"
         @section = SectionWrapper.new "Baseline Data"
         @extraction_forms_projects_section_type = ExtractionFormsProjectsSectionTypeWrapper.new "Type 2"
@@ -408,13 +409,23 @@ module ExportHelper
       when "quality"
         @section = SectionWrapper.new "Quality"
         @extraction_forms_projects_section_type = ExtractionFormsProjectsSectionTypeWrapper.new "Type 2"
-        QualityDetail.where( extraction_form_id: efs.extraction_form.id ).each do |qd|
-          question = QuestionWrapper.new(qd)
-          @questions << question
-          question.subquestions.each do |sq|
-            @questions << sq
-          end
+        QualityDimensionField.where( extraction_form_id: efs.extraction_form.id ).each do |qdf|
+          @questions << QuestionWrapper.new(qdf)
         end
+
+        QualityRatingField.where( extraction_form_id: efs.extraction_form.id ).each do |qrf|
+          @questions << QuestionWrapper.new(qrf)
+          break
+        end
+
+      #### This stuff is deprecated
+      #  QualityDetail.where( extraction_form_id: efs.extraction_form.id ).each do |qd|
+      #    question = QuestionWrapper.new(qd)
+      #    @questions << question
+      #    question.subquestions.each do |sq|
+      #      @questions << sq
+      #    end
+      #  end
       when "results"
         @section = SectionWrapper.new "Results"
         @extraction_forms_projects_section_type = ExtractionFormsProjectsSectionTypeWrapper.new "Results"
@@ -508,7 +519,8 @@ module ExportHelper
     attr_accessor :id, :name, :description, :ordering, :key_questions_projects, :dependencies, :question_rows, :subquestions
     @@id_counter = 1
     @@id_dict = {
-      "QualityDetail" => {},
+      "QualityDimensionField" => {},
+      "QualityRatingField" => {},
       "ArmDetail" => {},
       "OutcomeDetail" => {},
       "BaselineCharacteristic" => {},
@@ -525,16 +537,13 @@ module ExportHelper
       @key_questions_projects = []
 
       if q.class.name == "String"
-        @id = @@id_counter
-        @@id_counter += 1
         @name = q
         @description = ""
+        @id = @@id_counter
+        @@id_counter += 1
         #this is a subquestion
         return
       end
-
-      @name = q.question
-      @description = q.instruction
 
       if @@id_dict[q.class.name][q.id]
         @id = @@id_dict[q.class.name][q.id]
@@ -543,6 +552,18 @@ module ExportHelper
         @@id_dict[q.class.name][q.id] = @id
         @@id_counter += 1
       end
+
+      case q.class.name
+      when "QualityRatingField"
+        initialize_as_quality_rating q
+        return
+      when "QualityDimensionField"
+        initialize_as_quality_dimension q
+        return
+      end
+
+      @name = q.question
+      @description = q.instruction
 
       ExtractionForm.find(q.extraction_form_id).extraction_form_key_questions.each do |efkq|
         kq = KeyQuestion.find(efkq.key_question_id)
@@ -556,12 +577,6 @@ module ExportHelper
       linked_t1_column = ""
 
       case q.class.name
-      when "QualityDetail"
-        field_model = QualityDetailField
-        dp_model = QualityDetailDataPoint
-        q_column = "quality_detail_id"
-        field_column = "quality_detail_field_id"
-        linked_t1_column = "outcome_id"
       when "ArmDetail"
         field_model = ArmDetailField
         dp_model = ArmDetailDataPoint
@@ -633,7 +648,6 @@ module ExportHelper
             @question_rows << other_qr
 
 
-          #TODO: WHERE IS THE EXTRACTION ASSOCIATION, DUMMY
             dp = dp_model.where(field_column => f.id).first
             if dp then qrc.data_points << DataPointWrapper.new(dp) end
 
@@ -667,7 +681,7 @@ module ExportHelper
           if linked_t1_column.present?
             dpdict[dp.public_send(linked_t1_column)] ||= []
             dpdict[dp.public_send(linked_t1_column)] << dp
-          else 
+          else
             dpdict["no_linked_t1"] ||= []
             dpdict["no_linked_t1"] << dp
           end
@@ -723,19 +737,11 @@ module ExportHelper
           end
         end
 
-          #TODO: WHERE IS THE EXTRACTION ASSOCIATION, DUMMY
         dp_model.where(field_column => q.id).each do |dp|
           if dp.subquestion_value.present?
-            begin
-              sq_dict[dp.value].data_points << DataPointWrapper.new(dp, dp.subquestion_value)
-            rescue 
-              debugger
-            end
+            sq_dict[dp.value].data_points << DataPointWrapper.new(dp, dp.subquestion_value)
           end
 
-          if answer_dict[dp.value].nil?
-            debugger
-          end
           qrc.data_points << DataPointWrapper.new(dp, answer_dict[dp.value])
         end
 
@@ -786,11 +792,7 @@ module ExportHelper
 
         dp_model.where(field_column => q.id).each do |dp|
           if dp.subquestion_value.present?
-            begin
-              sq_dict[dp.value].data_points << DataPointWrapper.new(dp, dp.subquestion_value)
-            rescue
-              debugger
-            end
+            sq_dict[dp.value].data_points << DataPointWrapper.new(dp, dp.subquestion_value)
           end
 
           if answer_dict[dp.value].nil?
@@ -856,7 +858,7 @@ module ExportHelper
             if linked_t1_column.present?
               dpdict[dp.public_send(linked_t1_column)] ||= []
               dpdict[dp.public_send(linked_t1_column)] << dp
-            else 
+            else
               dpdict["no_linked_t1"] ||= []
               dpdict["no_linked_t1"] << dp
             end
@@ -873,7 +875,7 @@ module ExportHelper
           other_qr = nil
         end
 
-      when "matrix_radio" 
+      when "matrix_radio"
         r_farr = field_model.where(q_column => q.id, :column_number => 0).order(row_number: :asc)
         c_farr = field_model.where(q_column => q.id, :row_number => 0).order(column_number: :asc)
 
@@ -929,9 +931,6 @@ module ExportHelper
               sq_dict[answer_dict[dp.value]].data_points << DataPointWrapper.new(dp, dp.subquestion_value)
             end
 
-            if answer_dict[dp.value].nil?
-              debugger
-            end
             qrc.data_points << DataPointWrapper.new(dp, answer_dict[dp.value])
           end
         end
@@ -948,7 +947,7 @@ module ExportHelper
         other_qr = nil
 
         r_farr.each do |rf|
-          if rf.row_number == -1 
+          if rf.row_number == -1
             qr = QuestionRowWrapper.new("Other: ")
             qrc = QuestionRowColumnWrapper.new("","text") ## set type inside qrc
             qrcf = QuestionRowColumnFieldWrapper.new
@@ -1023,6 +1022,110 @@ module ExportHelper
           @question_rows << other_qr
           other_qr = nil
         end
+      end
+    end
+
+    def initialize_as_quality_dimension(qdf)
+      ef_id = qdf.extraction_form_id
+
+      options_arr = QualityDimensionField.get_dropdown_options qdf.id
+
+      qdf.title =~ /(.*) \[(.*)\]$/
+      @name = $1 || qdf.title
+      @description = qdf.field_notes
+      @dependencies = []
+      @subquestions = []
+      @question_rows = []
+      @key_questions_projects = []
+
+      ExtractionForm.find(ef_id).extraction_form_key_questions.each do |efkq|
+        kq = KeyQuestion.find(efkq.key_question_id)
+        @key_questions_projects << KeyQuestionsProjectWrapper.new(kq)
+      end
+
+      # there are two rows in quality rating: 1) value
+      #                                       2) notes
+
+      #VALUE
+      qr = QuestionRowWrapper.new("Value:")
+      value_qrc = QuestionRowColumnWrapper.new("","dropdown") ## set type inside qrc
+      qrcf = QuestionRowColumnFieldWrapper.new
+      value_qrc.question_row_column_fields << qrcf
+      qr.question_row_columns << value_qrc
+      @question_rows << qr
+
+      #NOTES
+      qr = QuestionRowWrapper.new("Notes:")
+      notes_qrc = QuestionRowColumnWrapper.new("","text") ## set type inside qrc
+      qrcf = QuestionRowColumnFieldWrapper.new
+      notes_qrc.question_row_column_fields << qrcf
+      qr.question_row_columns << notes_qrc
+      @question_rows << qr
+
+      answer_dict = {}
+      options_arr.each do |o|
+        option_id = value_qrc.add_answer_choice(o[0])
+        answer_dict[o[0]] = option_id.to_s
+      end
+
+      QualityDimensionDataPoint.where(extraction_form_id: ef_id, quality_dimension_field_id: qdf.id).each do |dp|
+        notes_qrc.data_points << DataPointWrapper.new(dp, dp.notes)
+        value_qrc.data_points << DataPointWrapper.new(dp, answer_dict[dp.value])
+      end
+    end
+
+    def initialize_as_quality_rating(qrf)
+      ef_id = qrf.extraction_form_id
+      @name = "Adjust Quality Rating"
+      @description = ""
+      @dependencies = []
+      @subquestions = []
+      @question_rows = []
+      @key_questions_projects = []
+
+      ExtractionForm.find(ef_id).extraction_form_key_questions.each do |efkq|
+        kq = KeyQuestion.find(efkq.key_question_id)
+        @key_questions_projects << KeyQuestionsProjectWrapper.new(kq)
+      end
+
+      # there are three rows in quality rating: 1) guideline used
+      #                                         2) overall rating
+      #                                         3) notes
+
+      #GUIDELINE USED
+      qr = QuestionRowWrapper.new("Quality Guideline Used:")
+      guideline_qrc = QuestionRowColumnWrapper.new("","text") ## set type inside qrc
+      qrcf = QuestionRowColumnFieldWrapper.new
+      guideline_qrc.question_row_column_fields << qrcf
+      qr.question_row_columns << guideline_qrc
+      @question_rows << qr
+
+      #OVERALL RATING
+      qr = QuestionRowWrapper.new("Select Current Overall Rating:")
+      rating_qrc = QuestionRowColumnWrapper.new("","dropdown") ## set type inside qrc
+      qrcf = QuestionRowColumnFieldWrapper.new
+      rating_qrc.question_row_column_fields << qrcf
+      qr.question_row_columns << rating_qrc
+      @question_rows << qr
+
+      #NOTES
+      qr = QuestionRowWrapper.new("Notes on this Rating:")
+      notes_qrc = QuestionRowColumnWrapper.new("","text") ## set type inside qrc
+      qrcf = QuestionRowColumnFieldWrapper.new
+      notes_qrc.question_row_column_fields << qrcf
+      qr.question_row_columns << notes_qrc
+      @question_rows << qr
+
+      answer_dict = {}
+      QualityRatingField.where(extraction_form_id: ef_id).order(display_number: :asc).each do |qrf|
+        option_id = rating_qrc.add_answer_choice(qrf.rating_item)
+        answer_dict[qrf.rating_item] = option_id.to_s
+      end
+
+      QualityRatingDataPoint.where(extraction_form_id: ef_id).each do |dp|
+        guideline_qrc.data_points << DataPointWrapper.new(dp, dp.guideline_used)
+        rating_qrc.data_points << DataPointWrapper.new(dp, answer_dict[dp.current_overall_rating])
+        notes_qrc.data_points << DataPointWrapper.new(dp, dp.notes)
       end
     end
 
@@ -1285,7 +1388,7 @@ module ExportHelper
           # @eefpst1_dict[dt.id] = eefpst1
         end
 
-      when "Arm Details", "Outcome Details", "Design Details", "Diagnostic Test Details" #TODO: Adverse Events, Quality Dimensions, Baseline Characteristics, Comparisons
+      when "Arm Details", "Outcome Details", "Design Details", "Diagnostic Test Details", "Quality", "Baseline Data"  #TODO: Adverse Events
         efps.questions.each do |q|
           q.question_rows.each do |qr|
             qr.question_row_columns.each do |qrc|
@@ -1674,6 +1777,7 @@ module ExportHelper
         @t1_type = if @t1_id.present? then "Diagnostic Test" else nil end
       when "DesignDetailDataPoint"
       when "QualityDimensionDataPoint"
+      when "QualityRatingDataPoint"
       end
       #case dp.class.name
       #when "ArmDetailDataPoint"
