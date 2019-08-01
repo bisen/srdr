@@ -35,8 +35,9 @@ module ExportHelper
         @cparr << cp
 
         s.study_extraction_forms.each do |sef|
-          pur = @purdict[s.creator_id]
           efp = @efpdict[sef.extraction_form_id]
+          if efp.nil? then next end
+          pur = @purdict[s.creator_id]
           @extractions << ExtractionWrapper.new(cp, pur, efp)
         end
       end
@@ -300,17 +301,15 @@ module ExportHelper
             efps.extraction_forms_projects_section_option = ExtractionFormsProjectsSectionOptionWrapper.new false, efso.include_total
           end
 
-        when "design", "quality"
+        when "design", "quality", "baseline"
           efps.extraction_forms_projects_section_option = ExtractionFormsProjectsSectionOptionWrapper.new false, false
         end
       end
-
       # ArmDetails -> Arms
       # OutcomeDetails -> Outcomes
       # QualityDetails -> Outcomes
       # DiagnosticTestDetails -> DiagnosticTests
       # AdverseEventColumns -> AdverseEvents
-
     end
 
     def id; @ef.id end
